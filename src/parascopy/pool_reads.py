@@ -163,8 +163,6 @@ def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, m
     for record in common.checked_fetch(in_bam, region, genome):
         if record.flag & 3844:
             continue
-        if record.mapping_quality > max_mapq:
-            continue
         read_pair = out_reads.get(record.query_name)
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, True)
@@ -262,7 +260,7 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
             out_reads = {}
             read_groups = bam_wrapper.read_groups()
             with bam_wrapper.open_bam_file(genome) as bam_file:
-                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, max_mapq, tags_to_reverse=
+                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, tags_to_reverse=
                                tags_to_reverse)
                 for dupl in tqdm.tqdm(duplications):
                     _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
