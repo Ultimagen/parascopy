@@ -8,7 +8,7 @@ import pysam
 import numpy as np
 from collections import defaultdict
 from enum import Enum
-
+import tqdm.auto as tqdm
 from .inner import common
 from .inner import duplication as duplication_
 from .inner.genome import Genome, Interval
@@ -19,7 +19,7 @@ from . import long_version
 
 
 MAX_REALIGNED_DIST = 100
-
+DEFAULT_MAX_MAPQ = 20
 class ReadPair:
     def __init__(self, record, max_mate_dist, from_main_copy):
         self.primary_ref_id = record.reference_id
@@ -101,7 +101,7 @@ UNDEF = common.UNDEF
 
 
 def _create_record(orig_record, header, read_groups, status,
-        *, dupl_strand=True, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF):
+        *, dupl_strand=True, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, tags_to_reverse = UNDEF):
     """
     Creates a new record by taking the orig_record as a template.
     If start, cigar_tuples, seq, qual are not provided, take them frmo the original record.
@@ -112,6 +112,9 @@ def _create_record(orig_record, header, read_groups, status,
         if seq is UNDEF else seq
     record.query_qualities = common.cond_reverse(orig_record.query_qualities, strand=dupl_strand) \
         if qual is UNDEF else qual
+    if tags_to_reverse is not UNDEF:
+        for t in tags_to_reverse:
+            record.set_tag(t, common.cond_reverse(orig_record.get_tag(t), strand=dupl_strand))
 
     if cigar_tuples is UNDEF:
         assert dupl_strand
@@ -156,25 +159,27 @@ def _create_header(genome, chrom_id, bam_wrappers, max_mate_dist):
     return pysam.AlignmentHeader.from_text(header)
 
 
-def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist):
+def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist, max_mapq, tags_to_reverse = []):
     for record in common.checked_fetch(in_bam, region, genome):
         if record.flag & 3844:
             continue
-
+        if record.mapping_quality > max_mapq:
+            continue
         read_pair = out_reads.get(record.query_name)
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, True)
-        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc))
+        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc, tags_to_reverse = tags_to_reverse))
 
 
-def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist):
+def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = []):
     """
     Load reads from dupl.region2 and aligns them to dupl.region1.
     """
     for record in common.checked_fetch(in_bam, dupl.region2, genome):
         if record.flag & 3844:
             continue
-
+        if record.mapping_quality > max_mapq:
+            continue
         read_pair = out_reads.get(record.query_name)
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, False)
@@ -184,7 +189,8 @@ def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out
 
         cigar_tuples = reg1_aln.cigar.to_pysam_tuples() if reg1_aln.cigar is not None else None
         new_rec = _create_record(record, out_header, read_groups, bam_file_.ReadStatus.Realigned,
-            dupl_strand=dupl.strand, seq=read_seq, cigar_tuples=cigar_tuples, start=reg1_aln.ref_interval.start)
+            dupl_strand=dupl.strand, seq=read_seq, cigar_tuples=cigar_tuples, start=reg1_aln.ref_interval.start, 
+            tags_to_reverse=tags_to_reverse)
         read_pair.add(new_rec)
 
 
@@ -207,7 +213,7 @@ def _get_fetch_regions(fetch_positions, max_dist=100):
     return fetch_regions
 
 
-def _add_mates(in_bam, out_reads, genome, out_header, read_groups, max_mate_dist):
+def _add_mates(in_bam, out_reads, genome, out_header, read_groups, max_mate_dist, max_mapq):
     fetch_positions = []
     for read_pair in out_reads.values():
         fetch_pos = read_pair.need_fetch()
@@ -219,6 +225,8 @@ def _add_mates(in_bam, out_reads, genome, out_header, read_groups, max_mate_dist
     for region in _get_fetch_regions(fetch_positions):
         for record in common.checked_fetch(in_bam, region, genome):
             if record.flag & 3844:
+                continue
+            if record.mapping_quality > max_mapq:
                 continue
             read_pair = out_reads.get(record.query_name)
             if read_pair is None or read_pair.records[record.is_read2]:
@@ -236,7 +244,7 @@ def _add_mates(in_bam, out_reads, genome, out_header, read_groups, max_mate_dist
 DEFAULT_MATE_DISTANCE = 5000
 
 def pool(bam_wrappers, out_path, interval, duplications, genome, *,
-        samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE, verbose=True, time_log=None):
+        samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE, verbose=True, time_log=None, tags_to_reverse = [], max_mapq=DEFAULT_MAX_MAPQ):
     if weights is None:
         weights = Weights()
     if verbose:
@@ -254,12 +262,13 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
             out_reads = {}
             read_groups = bam_wrapper.read_groups()
             with bam_wrapper.open_bam_file(genome) as bam_file:
-                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist)
-                for dupl in duplications:
+                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, max_mapq, tags_to_reverse=
+                               tags_to_reverse)
+                for dupl in tqdm.tqdm(duplications):
                     _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
-                        out_header, weights, max_mate_dist)
+                        out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = tags_to_reverse)
                 if max_mate_dist != 0:
-                    _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist)
+                    _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist, max_mapq)
 
             for read_pair in out_reads.values():
                 read_pair.connect_pairs(max_mate_dist)
@@ -399,7 +408,7 @@ def load_bam_files(input, input_list, genome):
 def main(prog_name=None, in_argv=None):
     prog_name = prog_name or '%(prog)s'
     parser = argparse.ArgumentParser(
-        description='Pool reads from various copies of a duplication.',
+        description='Pool reads from various copies of a duplication',
         formatter_class=argparse.RawTextHelpFormatter, add_help=False,
         usage='{} (-i <bam> [...] | -I <bam-list>) -t <table> -f <fasta> -r <region> -o <bam>'.format(prog_name))
     io_args = parser.add_argument_group('Input/output arguments')
@@ -436,6 +445,8 @@ def main(prog_name=None, in_argv=None):
             'if the distance between mates is less than <int> [default: %(default)s].\n'
             'Use 0 to skip all mates outside the duplicated regions.\n'
             'Use inf|infinity to write all mapped read mates.\n')
+    opt_args.add_argument('-M', '--max-mapq', help="Maximal mapping quality to pool", metavar='<int>', type=int, default=DEFAULT_MAX_MAPQ)
+    opt_args.add_argument('--tags_to_reverse', nargs='+', default=[],help='Optional tags to be included in the output BAM file and reversed.')
     opt_args.add_argument('-q', '--quiet', action='store_false', dest='verbose',
         help='Do not write information to the stderr.')
     opt_args.add_argument('--samtools', metavar='<path>|none', default='samtools',
@@ -455,7 +466,7 @@ def main(prog_name=None, in_argv=None):
         bam_wrappers, _samples = load_bam_files(args.input, args.input_list, genome)
         duplications = load_duplications(table, genome, interval, args.exclude)
         pool(bam_wrappers, args.output, interval, duplications, genome,
-            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose)
+            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose, tags_to_reverse=args.tags_to_reverse, max_mapq=args.max_mapq)
 
 
 if __name__ == '__main__':
