@@ -159,7 +159,7 @@ def _create_header(genome, chrom_id, bam_wrappers, max_mate_dist):
     return pysam.AlignmentHeader.from_text(header)
 
 
-def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist, max_mapq, tags_to_reverse = []):
+def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist, tags_to_reverse = []):
     for record in common.checked_fetch(in_bam, region, genome):
         if record.flag & 3844:
             continue
