@@ -347,6 +347,7 @@ def get_pool_interval(interval, genome, pool_interval=2000):
 
 
 def analyze_region(interval, subdir, data, samples, bg_depth, model_params, force_agcn, modified_ref_cns):
+    
     duplications = []
     pool_duplications = []
     skip_regions = []
@@ -464,7 +465,7 @@ def analyze_region(interval, subdir, data, samples, bg_depth, model_params, forc
             samples, bg_depth, read_groups_dict, dupl_hierarchy, out.depth)
 
         if not model_params.is_loaded:
-            _filter_windows(window_counts, bg_depth, dupl_hierarchy, min_windows=args.min_windows, perc_samples=10.0)
+            _filter_windows(window_counts, bg_depth, dupl_hierarchy, min_windows=args.min_windows, perc_samples=50.0)
             model_params.set_dupl_hierarchy(dupl_hierarchy)
 
         time_log.log('Writing read depth and PSV observations')
