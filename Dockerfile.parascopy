@@ -1,0 +1,19 @@
+FROM ubuntu:22.04
+
+RUN apt-get update -y && apt-get install -y samtools bcftools tabix bwa
+RUN apt-get install -y git python3 pip
+
+ARG parascopy_version
+
+RUN pip install setuptools
+
+RUN \
+    mkdir parascopy && \
+    cd parascopy && \
+    git init . && \
+    git remote add origin https://github.com/Ultimagen/parascopy.git && \
+    git fetch --depth 1 origin "${parascopy_version}" && \
+    git checkout FETCH_HEAD
+
+WORKDIR /parascopy
+RUN python3 setup.py install
