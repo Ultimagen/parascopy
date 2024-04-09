@@ -150,11 +150,18 @@ def _create_record(orig_record, header, read_groups, status,
 
 
 def _create_header(genome, chrom_id, bam_wrappers, max_mate_dist):
-    header = '@SQ\tSN:{}\tLN:{}\n'.format(genome.chrom_name(chrom_id), genome.chrom_len(chrom_id))
+    header = ''
+    for chrom_id in range(genome.n_chromosomes):
+        header += '@SQ\tSN:{}\tLN:{}\n'.format(genome.chrom_name(chrom_id), genome.chrom_len(chrom_id))
     for bam_wrapper in bam_wrappers:
-        for group_id, sample in bam_wrapper.read_groups().values():
+        for group_id_key in bam_wrapper.read_groups():
+            group_id, sample = bam_wrapper.read_groups()[group_id_key]
             assert isinstance(sample, str)
-            header += '@RG\tID:{}\tSM:{}\n'.format(group_id, sample)
+            header += '@RG\tID:{}\tSM:{}'.format(group_id, sample)
+            for tag, value in bam_wrapper._read_groups_tags[group_id_key].items():
+                if tag != 'ID' and tag != 'SM':
+                    header += '\t{}:{}'.format(tag, value)
+            header += '\n'
     header += '@CO\tmax_mate_dist={}\n'.format(max_mate_dist)
     return pysam.AlignmentHeader.from_text(header)
 
@@ -311,6 +318,7 @@ class BamWrapper:
         self._input_sample = sample
         with self.open_bam_file(genome) as bam_file:
             self._old_read_groups = bam_file_.get_read_groups(bam_file)
+            self._old_read_group_tags = bam_file_.get_read_groups_tags(bam_file)
             if store_contigs:
                 self._contigs = tuple(bam_file.references)
             else:
@@ -320,6 +328,7 @@ class BamWrapper:
     def init_new_read_groups(self, samples):
         # Dictionary old_read_group -> (new_read_group, sample_name).
         self._read_groups = {}
+        self._read_groups_tags = {}
 
         if self._input_sample is not None:
             # Associate reads without read_group with sample from the input file.
@@ -330,6 +339,7 @@ class BamWrapper:
             new_sample = self._input_sample or old_sample
             new_read_group = '{}-{}'.format(old_read_group, samples.id(new_sample))
             self._read_groups[old_read_group] = (new_read_group, new_sample)
+            self._read_groups_tags[old_read_group] = self._old_read_group_tags[old_read_group]
 
         if not self._read_groups:
             common.log('ERROR: Input file {} has no read groups in the header.'.format(self._filename))
