@@ -101,7 +101,7 @@ UNDEF = common.UNDEF
 
 
 def _create_record(orig_record, header, read_groups, status,
-        *, dupl_strand=True, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, tags_to_reverse = UNDEF):
+        *, dupl_strand=True, contig=UNDEF, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, tags_to_reverse = UNDEF):
     """
     Creates a new record by taking the orig_record as a template.
     If start, cigar_tuples, seq, qual are not provided, take them frmo the original record.
@@ -121,7 +121,10 @@ def _create_record(orig_record, header, read_groups, status,
         cigar_tuples = orig_record.cigartuples
     # This is either input cigar_tuples, or orig_record.cigartuples.
     if cigar_tuples:
-        record.reference_id = 0
+        if contig == UNDEF:
+            record.reference_id = 0
+        else:
+            record.reference_id = header.get_tid(contig)
         record.reference_start = orig_record.reference_start if start is UNDEF else start
         record.mapping_quality = 60
         record.cigartuples = cigar_tuples
@@ -173,7 +176,8 @@ def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, m
         read_pair = out_reads.get(record.query_name)
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, True)
-        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc, tags_to_reverse = tags_to_reverse))
+        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc, 
+                                     tags_to_reverse = tags_to_reverse, contig=record.reference_name))
 
 
 def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = []):
@@ -195,7 +199,7 @@ def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out
         cigar_tuples = reg1_aln.cigar.to_pysam_tuples() if reg1_aln.cigar is not None else None
         new_rec = _create_record(record, out_header, read_groups, bam_file_.ReadStatus.Realigned,
             dupl_strand=dupl.strand, seq=read_seq, cigar_tuples=cigar_tuples, start=reg1_aln.ref_interval.start, 
-            tags_to_reverse=tags_to_reverse)
+            contig = reg1_aln.ref_interval.chrom_name(genome), tags_to_reverse=tags_to_reverse)
         read_pair.add(new_rec)
 
 
