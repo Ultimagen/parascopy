@@ -101,7 +101,7 @@ UNDEF = common.UNDEF
 
 
 def _create_record(orig_record, header, read_groups, status,
-        *, dupl_strand=True, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, tags_to_reverse = UNDEF):
+        *, dupl_strand=True, contig=UNDEF, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, tags_to_reverse = UNDEF):
     """
     Creates a new record by taking the orig_record as a template.
     If start, cigar_tuples, seq, qual are not provided, take them frmo the original record.
@@ -121,7 +121,10 @@ def _create_record(orig_record, header, read_groups, status,
         cigar_tuples = orig_record.cigartuples
     # This is either input cigar_tuples, or orig_record.cigartuples.
     if cigar_tuples:
-        record.reference_id = 0
+        if contig == UNDEF:
+            record.reference_id = 0
+        else:
+            record.reference_id = header.get_tid(contig)
         record.reference_start = orig_record.reference_start if start is UNDEF else start
         record.mapping_quality = 60
         record.cigartuples = cigar_tuples
@@ -150,11 +153,18 @@ def _create_record(orig_record, header, read_groups, status,
 
 
 def _create_header(genome, chrom_id, bam_wrappers, max_mate_dist):
-    header = '@SQ\tSN:{}\tLN:{}\n'.format(genome.chrom_name(chrom_id), genome.chrom_len(chrom_id))
+    header = ''
+    for chrom_id in range(genome.n_chromosomes):
+        header += '@SQ\tSN:{}\tLN:{}\n'.format(genome.chrom_name(chrom_id), genome.chrom_len(chrom_id))
     for bam_wrapper in bam_wrappers:
-        for group_id, sample in bam_wrapper.read_groups().values():
+        for group_id_key in bam_wrapper.read_groups():
+            group_id, sample = bam_wrapper.read_groups()[group_id_key]
             assert isinstance(sample, str)
-            header += '@RG\tID:{}\tSM:{}\n'.format(group_id, sample)
+            header += '@RG\tID:{}\tSM:{}'.format(group_id, sample)
+            for tag, value in bam_wrapper._read_groups_tags[group_id_key].items():
+                if tag != 'ID' and tag != 'SM':
+                    header += '\t{}:{}'.format(tag, value)
+            header += '\n'
     header += '@CO\tmax_mate_dist={}\n'.format(max_mate_dist)
     return pysam.AlignmentHeader.from_text(header)
 
@@ -166,7 +176,8 @@ def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, m
         read_pair = out_reads.get(record.query_name)
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, True)
-        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc, tags_to_reverse = tags_to_reverse))
+        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc, 
+                                     tags_to_reverse = tags_to_reverse, contig=record.reference_name))
 
 
 def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = []):
@@ -188,7 +199,7 @@ def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out
         cigar_tuples = reg1_aln.cigar.to_pysam_tuples() if reg1_aln.cigar is not None else None
         new_rec = _create_record(record, out_header, read_groups, bam_file_.ReadStatus.Realigned,
             dupl_strand=dupl.strand, seq=read_seq, cigar_tuples=cigar_tuples, start=reg1_aln.ref_interval.start, 
-            tags_to_reverse=tags_to_reverse)
+            contig = reg1_aln.ref_interval.chrom_name(genome), tags_to_reverse=tags_to_reverse)
         read_pair.add(new_rec)
 
 
@@ -311,6 +322,7 @@ class BamWrapper:
         self._input_sample = sample
         with self.open_bam_file(genome) as bam_file:
             self._old_read_groups = bam_file_.get_read_groups(bam_file)
+            self._old_read_group_tags = bam_file_.get_read_groups_tags(bam_file)
             if store_contigs:
                 self._contigs = tuple(bam_file.references)
             else:
@@ -320,6 +332,7 @@ class BamWrapper:
     def init_new_read_groups(self, samples):
         # Dictionary old_read_group -> (new_read_group, sample_name).
         self._read_groups = {}
+        self._read_groups_tags = {}
 
         if self._input_sample is not None:
             # Associate reads without read_group with sample from the input file.
@@ -330,6 +343,7 @@ class BamWrapper:
             new_sample = self._input_sample or old_sample
             new_read_group = '{}-{}'.format(old_read_group, samples.id(new_sample))
             self._read_groups[old_read_group] = (new_read_group, new_sample)
+            self._read_groups_tags[old_read_group] = self._old_read_group_tags[old_read_group]
 
         if not self._read_groups:
             common.log('ERROR: Input file {} has no read groups in the header.'.format(self._filename))
