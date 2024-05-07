@@ -101,7 +101,8 @@ UNDEF = common.UNDEF
 
 
 def _create_record(orig_record, header, read_groups, status,
-        *, dupl_strand=True, contig=UNDEF, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, tags_to_reverse = UNDEF):
+        *, dupl_strand=True, contig=UNDEF, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, 
+        tags_to_reverse = UNDEF, tags_to_retain = UNDEF):
     """
     Creates a new record by taking the orig_record as a template.
     If start, cigar_tuples, seq, qual are not provided, take them frmo the original record.
@@ -115,6 +116,9 @@ def _create_record(orig_record, header, read_groups, status,
     if tags_to_reverse is not UNDEF:
         for t in tags_to_reverse:
             record.set_tag(t, common.cond_reverse(orig_record.get_tag(t), strand=dupl_strand))
+    if tags_to_retain is not UNDEF:
+        for t in tags_to_retain:
+            record.set_tag(t, orig_record.get_tag(t))
 
     if cigar_tuples is UNDEF:
         assert dupl_strand
