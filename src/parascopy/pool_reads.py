@@ -173,7 +173,8 @@ def _create_header(genome, chrom_id, bam_wrappers, max_mate_dist):
     return pysam.AlignmentHeader.from_text(header)
 
 
-def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist, tags_to_reverse = []):
+def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist, 
+                   tags_to_reverse = UNDEF, tags_to_retain = UNDEF):
     for record in common.checked_fetch(in_bam, region, genome):
         if record.flag & 3844:
             continue
@@ -181,7 +182,9 @@ def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, m
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, True)
         read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc, 
-                                     tags_to_reverse = tags_to_reverse, contig=record.reference_name))
+                                     tags_to_retain = tags_to_retain,
+                                     tags_to_reverse = tags_to_reverse, 
+                                     contig=record.reference_name))
 
 
 def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = []):
@@ -257,7 +260,8 @@ def _add_mates(in_bam, out_reads, genome, out_header, read_groups, max_mate_dist
 DEFAULT_MATE_DISTANCE = 5000
 
 def pool(bam_wrappers, out_path, interval, duplications, genome, *,
-        samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE, verbose=True, time_log=None, tags_to_reverse = [], max_mapq=DEFAULT_MAX_MAPQ):
+        samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE, verbose=True, time_log=None, 
+        tags_to_reverse = [], tags_to_retain = [], max_mapq=DEFAULT_MAX_MAPQ):
     if weights is None:
         weights = Weights()
     if verbose:
@@ -275,11 +279,12 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
             out_reads = {}
             read_groups = bam_wrapper.read_groups()
             with bam_wrapper.open_bam_file(genome) as bam_file:
-                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, tags_to_reverse=
-                               tags_to_reverse)
+                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, 
+                               tags_to_reverse=tags_to_reverse, tags_to_retain = tags_to_retain)
                 for dupl in tqdm.tqdm(duplications):
                     _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
-                        out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = tags_to_reverse)
+                        out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = tags_to_reverse, 
+                        tags_to_retain = tags_to_retain)
                 if max_mate_dist != 0:
                     _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist, max_mapq)
 
@@ -463,6 +468,7 @@ def main(prog_name=None, in_argv=None):
             'Use inf|infinity to write all mapped read mates.\n')
     opt_args.add_argument('-M', '--max-mapq', help="Maximal mapping quality to pool", metavar='<int>', type=int, default=DEFAULT_MAX_MAPQ)
     opt_args.add_argument('--tags_to_reverse', nargs='+', default=[],help='Optional tags to be included in the output BAM file and reversed.')
+    opt_args.add_argument('--tags_to_retain', nargs='+', default=[],help='Optional tags to be included in the output BAM file and retained.')    
     opt_args.add_argument('-q', '--quiet', action='store_false', dest='verbose',
         help='Do not write information to the stderr.')
     opt_args.add_argument('--samtools', metavar='<path>|none', default='samtools',
@@ -482,7 +488,8 @@ def main(prog_name=None, in_argv=None):
         bam_wrappers, _samples = load_bam_files(args.input, args.input_list, genome)
         duplications = load_duplications(table, genome, interval, args.exclude)
         pool(bam_wrappers, args.output, interval, duplications, genome,
-            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose, tags_to_reverse=args.tags_to_reverse, max_mapq=args.max_mapq)
+            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose, 
+            tags_to_reverse=args.tags_to_reverse, tags_to_retain = args.tags_to_retain, max_mapq=args.max_mapq)
 
 
 if __name__ == '__main__':
