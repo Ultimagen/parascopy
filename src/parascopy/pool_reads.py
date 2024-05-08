@@ -115,10 +115,12 @@ def _create_record(orig_record, header, read_groups, status,
         if qual is UNDEF else qual
     if tags_to_reverse is not UNDEF:
         for t in tags_to_reverse:
-            record.set_tag(t, common.cond_reverse(orig_record.get_tag(t), strand=dupl_strand))
+            if orig_record.has_tag(t):
+                record.set_tag(t, common.cond_reverse(orig_record.get_tag(t), strand=dupl_strand))
     if tags_to_retain is not UNDEF:
         for t in tags_to_retain:
-            record.set_tag(t, orig_record.get_tag(t))
+            if orig_record.has_tag(t):
+                record.set_tag(t, orig_record.get_tag(t))
 
     if cigar_tuples is UNDEF:
         assert dupl_strand
