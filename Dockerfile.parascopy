@@ -12,8 +12,8 @@ RUN \
     cd parascopy && \
     git init . && \
     git remote add origin https://github.com/Ultimagen/parascopy.git && \
-    git fetch --depth 1 origin "${parascopy_version}" && \
-    git checkout FETCH_HEAD
+    git fetch --depth 1 origin && \
+    git checkout "${parascopy_version}"
 
 WORKDIR /parascopy
 RUN python3 setup.py install
