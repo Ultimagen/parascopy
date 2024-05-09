@@ -12,7 +12,7 @@ RUN \
     cd parascopy && \
     git init . && \
     git remote add origin https://github.com/Ultimagen/parascopy.git && \
-    git fetch --depth 1 origin && \
+    git fetch origin && \
     git checkout "${parascopy_version}"
 
 WORKDIR /parascopy
