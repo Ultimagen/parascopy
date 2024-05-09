@@ -189,7 +189,8 @@ def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, m
                                      contig=record.reference_name))
 
 
-def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = []):
+def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist, max_mapq, 
+tags_to_reverse = UNDEF, tags_to_retain = UNDEF):
     """
     Load reads from dupl.region2 and aligns them to dupl.region1.
     """
@@ -208,7 +209,8 @@ def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out
         cigar_tuples = reg1_aln.cigar.to_pysam_tuples() if reg1_aln.cigar is not None else None
         new_rec = _create_record(record, out_header, read_groups, bam_file_.ReadStatus.Realigned,
             dupl_strand=dupl.strand, seq=read_seq, cigar_tuples=cigar_tuples, start=reg1_aln.ref_interval.start, 
-            contig = reg1_aln.ref_interval.chrom_name(genome), tags_to_reverse=tags_to_reverse)
+            contig = reg1_aln.ref_interval.chrom_name(genome), tags_to_reverse=tags_to_reverse, 
+            tags_to_retain = tags_to_retain)
         read_pair.add(new_rec)
 
 
