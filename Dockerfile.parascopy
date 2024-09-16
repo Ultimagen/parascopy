@@ -31,7 +31,8 @@ FROM python:3.10.15-slim
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
     bcftools \
     tabix \
-    bwa && \
+    bwa \
+    procps && \
     apt-get autoclean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=samtools /usr/local/bin/samtools /usr/local/bin/
