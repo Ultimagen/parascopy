@@ -40,14 +40,15 @@ jobs:
           fi
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       - name: Login to Amazon ECR
         id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -59,7 +60,7 @@ jobs:
 
       - name: Login to GAR
         id: gar-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: us-central1-docker.pkg.dev
           username: oauth2accesstoken
