@@ -1,0 +1,25 @@
+name: Build parascopy docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: "Docker image tag, If omitted will use github short sha"
+        required: false
+        type: string
+
+permissions:
+  id-token: write # Required for assuming an AWS role
+  contents: read # Required for actions/checkout
+
+env:
+  AWS_REGION: us-east-1
+  IMAGE: parascopy
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - run: |
+          echo DUMMY
