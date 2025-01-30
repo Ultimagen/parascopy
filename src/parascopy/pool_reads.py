@@ -291,7 +291,7 @@ DEFAULT_MATE_DISTANCE = 5000
 def pool(bam_wrappers, out_path, interval, duplications, genome, *,
         samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE,
         verbose=True, time_log=None, write_cram=True, single_out=False, 
-        tags_to_reverse = [], tags_to_retain = [], max_mapq = DEFAULT_MAX_MAPQ):
+        tags_to_reverse = [], tags_to_retain = [], max_mapq = 60):
     """
     Pools reads from multiple BAM/CRAM files.
     Returns list of output files.
@@ -326,17 +326,17 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
         elif verbose:
             common.log('    [{:3d} / {}]  {}'.format(bam_index + 1, len(bam_wrappers), bam_wrapper.filename))
 
-            out_reads = {}
-            read_groups = bam_wrapper.read_groups()
-            with bam_wrapper.open_bam_file(genome) as bam_file:
-                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, 
-                               tags_to_reverse=tags_to_reverse, tags_to_retain = tags_to_retain)
-                for dupl in tqdm.tqdm(duplications):
-                    _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
-                        out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = tags_to_reverse, 
-                        tags_to_retain = tags_to_retain)
-                if max_mate_dist != 0:
-                    _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist, max_mapq)
+        out_reads = {}
+        read_groups = bam_wrapper.read_groups()
+        with bam_wrapper.open_bam_file(genome) as bam_file:
+            _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, 
+                            tags_to_reverse=tags_to_reverse, tags_to_retain = tags_to_retain)
+            for dupl in tqdm.tqdm(duplications):
+                _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
+                    out_header, weights, max_mate_dist, max_mapq, tags_to_reverse = tags_to_reverse, 
+                    tags_to_retain = tags_to_retain)
+            if max_mate_dist != 0:
+                _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist, max_mapq)
 
         records = []
         for read_pair in out_reads.values():
