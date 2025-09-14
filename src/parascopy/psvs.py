@@ -161,7 +161,7 @@ def create_vcf_header(genome, chrom_ids=None, argv=None):
             .format(genome.chrom_name(chrom_id), genome.chrom_len(chrom_id)))
     vcf_header.add_line('##ALT=<ID=COMPLEX,Description="Long and complex PSV.">')
     vcf_header.add_line('##FILTER=<ID=BOUNDARY,Description="PSV overlaps boundary of a duplication.">')
-    vcf_header.add_line('##INFO=<ID=pos2,Number=.,Type=String,Description="Second positions of the PSV. '
+    vcf_header.add_line('##INFO=<ID=pos2,Number=1,Type=String,Description="Second positions of the PSV. '
         'Format: chrom:pos:strand[:allele]">')
     return vcf_header
 
