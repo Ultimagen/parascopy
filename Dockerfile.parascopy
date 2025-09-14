@@ -50,7 +50,7 @@ RUN git clone --recursive https://github.com/tprodanov/freebayes &&  \
 WORKDIR /parascopy
 COPY . .
 
-RUN python3 setup.py install
+RUN pip install .
 
 # Include licenses
 COPY ["LICENSE", "./"]
