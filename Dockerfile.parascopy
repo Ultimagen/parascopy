@@ -37,6 +37,16 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
 
 COPY --from=samtools /usr/local/bin/samtools /usr/local/bin/
 
+RUN apt-get update && apt-get install -y meson 
+
+RUN apt-get update && apt-get install -y git zlib1g-dev libgsl-dev build-essential liblzma-dev pkg-config
+
+RUN git clone --recursive https://github.com/tprodanov/freebayes &&  \
+    cd freebayes && \
+    ./compile.sh && \
+    cp build/freebayes /usr/local/bin/freebayes && \
+    cd ..
+
 WORKDIR /parascopy
 COPY . .
 
