@@ -52,13 +52,13 @@ Alternatively, you can install it manually using the following commands:
 ```bash
 git clone https://github.com/tprodanov/parascopy.git
 cd parascopy
-python3 setup.py install
+pip install .
 ```
 
 Parascopy depends on several Python modules [(see here)](requirements.txt).
 To install Parascopy without dependencies, you can run
 ```bash
-python3 setup.py develop --no-deps
+pip install -e .
 ```
 Additionally, you can specify installation path using `--prefix <path>`.
 
