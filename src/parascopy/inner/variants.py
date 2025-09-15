@@ -867,6 +867,8 @@ class VariantReadObservations:
                     continue
                 pos2_str.append('{}:{}:{}'.format(pos2.region.chrom_name(genome), pos2.region.start_1,
                     '+' if pos.strand == pos2.strand else '-'))
+            if len(pos2_str) == 0 :
+                pos2_str = ['.']
             record.info['pos2'] = pos2_str
             record.info['overlPSV'] = 'T' if self.has_psvs else 'F'
             self.new_vcf_records.append(record)
