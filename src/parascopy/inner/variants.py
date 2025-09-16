@@ -1107,7 +1107,7 @@ class VariantReadObservations:
             vcf_header.add_line('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">')
             vcf_header.add_line('##FORMAT=<ID=FILT,Number=.,Type=String,Description="Sample-specific filter">')
             vcf_header.add_line('##FORMAT=<ID=GTs,Number=.,Type=String,Description="Possible genotypes.">')
-            vcf_header.add_line('##FORMAT=<ID=GQ,Number=1,Type=Float,Description="The Phred-scaled Genotype Quality">')
+            vcf_header.add_line('##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="The Phred-scaled Genotype Quality">')
             vcf_header.add_line('##FORMAT=<ID=GQ0,Number=1,Type=Float,Description='
                 '"Unedited genotype quality in case there is a sample-specific filter present.">')
             vcf_header.add_line('##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">')
