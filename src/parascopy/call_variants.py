@@ -284,12 +284,24 @@ def analyze_locus(locus, model_params, data, samples, limit_regions, assume_cn):
     cn_profiles = paralog_cn.CopyNumProfiles(filenames.cn_res, genome, samples, locus.chrom_id)
     filenames.read_allele = os.path.join(filenames.subdir, 'read_allele_obs.bin')
     filenames.freebayes = os.path.join(filenames.subdir, 'freebayes.vcf')
+    if args.precalled_variants is not None:
+        filenames.precalled = args.precalled_variants
+        filenames.freebayes_updated = filenames.freebayes + '.with_precalled.vcf'
+    else:
+        filenames.precalled = None
+        filenames.freebayes_updated = filenames.freebayes
     filenames.cnv_map = os.path.join(filenames.subdir, 'cnv_map.bed')
     filenames.pooled_bed = os.path.join(filenames.out_dir, 'variants_pooled.bed.gz')
     filenames.paralog_bed = os.path.join(filenames.out_dir, 'variants.bed.gz')
     _write_calling_regions(cn_profiles, samples, genome, assume_cn, args.max_agcn, filenames)
 
     _run_freebayes(locus, genome, args, filenames, call_regions)
+    
+    if filenames.precalled is not None:
+        common.log('Updating Freebayes calls with precalled variants from {}'.format(filenames.precalled))
+        variants_.update_with_precalled(filenames.freebayes, filenames.precalled, filenames.freebayes_updated, call_regions, genome) # type: ignore
+        os.rename(filenames.freebayes_updated, filenames.freebayes)
+        
 
     common.log('    [{}] Loading read-allele observations'.format(locus.name))
     dupl_pos_finder = variants_.DuplPositionFinder(locus.chrom_id, duplications)
@@ -524,6 +536,8 @@ def main(prog_name=None, in_argv=None):
         help='Maximum unpaired bias (Phred score) [default: %(default)s].')
     call_args.add_argument('--max-agcn', type=int, metavar='<int>', default=10,
         help='Maximum aggregate copy number [default: %(default)s].')
+    call_args.add_argument('--precalled-variants', metavar='<vcf>', required=False,
+        help='In addition to Freebayes, use variants status and filter from the provided and indexed VCF file')
 
     exec_args = parser.add_argument_group('Execution parameters')
     exec_args.add_argument('--rerun', choices=('full', 'partial', 'none'), metavar='full|partial|none', default='none',

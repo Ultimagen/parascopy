@@ -11,13 +11,54 @@ from collections import namedtuple, defaultdict, OrderedDict
 
 from . import duplication as duplication_
 from .cigar import Cigar, Operation
-from .genome import Interval
+from .genome import Interval, Genome
 from .paralog_cn import Filters, SamplePsvInfo
 from . import errors
 from . import common
 from . import itree
 from . import polynomials
 
+def copy_vcf_record(rec: "pysam.VariantRecord", new_header: "pysam.VariantHeader") -> "pysam.VariantRecord":
+    """
+    Create a new VCF record with the same data as the input record, but using a new header.
+
+    Parameters
+    ----------
+    rec : pysam.VariantRecord
+        The original VCF record to copy.
+    new_header : pysam.VariantHeader
+        The new VCF header to use for the copied record.
+
+    Returns
+    -------
+    pysam.VariantRecord
+        A new VCF record with the same data as `rec`, but using `new_header`.
+    """
+    new_record = new_header.new_record(
+        contig=rec.chrom,
+        start=rec.start,
+        stop=rec.stop,
+        id=rec.id,
+        qual=rec.qual,
+        alleles=rec.alleles,
+        filter=rec.filter.keys(),
+    )
+
+    # copy INFO fields
+    for k, v in rec.info.items():
+        if k in new_header.info:
+            new_record.info[k] = v
+
+    # copy FORMAT fields
+    for sample in rec.samples:
+        src = rec.samples[sample]
+        tgt = new_record.samples[sample]
+        for k, v in src.items():
+            if v in (None, (None,)):
+                continue  # no need to assign missing values
+            tgt[k] = v
+
+    return new_record
 
 def copy_vcf_fields(source_rec, target_rec, old_to_new=None):
     """
@@ -1177,6 +1218,47 @@ def read_freebayes_results(ra_reader, samples, vcf_file, dupl_pos_finder):
                 vcf_record = _next_or_none(vcf_file)
     return all_read_allele_obs
 
+def update_with_precalled(fb_vcf:str, precalled_vcf:str, output_vcf:str, limit_regions:list[Interval], genome: Genome):
+    
+    count_miss_precall = 0 
+    count_change_filter = 0 
+    count_no_change = 0 
+    precalled_vcf_records = []
+    with pysam.VariantFile(precalled_vcf) as precalled_file:
+        precalled_header = precalled_file.header.copy()
+        for region in limit_regions:
+            precalled_vcf_records.extend(list(precalled_file.fetch(region.chrom_name(genome),region.start, region.end )))
+    precalled_vcf_records = iter(precalled_vcf_records)
+    with pysam.VariantFile(fb_vcf) as fb_file:
+        header = fb_file.header.copy()
+        for filt in precalled_header.filters:
+            if filt not in header.filters:
+                header.filters.add(filt, None, None, description=str(precalled_header.filters[filt].description))
+        header.filters.add("MISS_PRE_CALL",None, None, description="Variant missing in PRE-call set calls")
+        precalled_record = _next_or_none(precalled_vcf_records)
+        with pysam.VariantFile(output_vcf, "w", header=header) as out_file:
+            for fb_record in fb_file:
+                new_record = copy_vcf_record(fb_record, header)
+                while precalled_record is not None and (new_record.chrom > precalled_record.chrom or
+                        (new_record.chrom == precalled_record.chrom and new_record.start > precalled_record.start)):
+                    precalled_record = _next_or_none(precalled_vcf_records)
+
+                if (precalled_record is not None and new_record.chrom == precalled_record.chrom and
+                        new_record.start == precalled_record.start):
+                    if precalled_record.filter.keys() == ['PASS']:
+                        out_file.write(new_record)
+                        count_no_change += 1 
+                    else:
+                        for k in precalled_record.filter.keys():
+                            new_record.filter.add(str(k))
+                        out_file.write(new_record)
+                        count_change_filter += 1
+                else:
+                    new_record.filter.add("MISS_PRE_CALL")
+                    out_file.write(new_record)
+                    count_miss_precall+=1
+
+    common.log(f"INFO: apply pre-called MISS={count_miss_precall}, CHANGE={count_change_filter}, SAME={count_no_change}")
 
 def add_psv_variants(locus, all_read_allele_obs, psv_records, genome, varcall_params):
     searcher = itree.NonOverlTree(all_read_allele_obs, itree.start, itree.variant_end)
