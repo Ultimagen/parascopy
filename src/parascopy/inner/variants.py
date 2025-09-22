@@ -1137,9 +1137,13 @@ class VariantReadObservations:
             return False
         psv_gt_out.write('T\n')
         return True
-
+    
+    @staticmethod 
+    def get_vcf_filters(vcf_file):
+        return pysam.VariantFile(vcf_file).header.filters
+    
     @staticmethod
-    def create_vcf_headers(genome, argv, samples):
+    def create_vcf_headers(genome, argv, samples, freebayes_vcf_filters):
         vcf_headers = []
         # First pooled, second un-pooled.
         for i in range(2):
@@ -1147,6 +1151,10 @@ class VariantReadObservations:
             vcf_header.add_line(common.vcf_command_line(argv))
             for name, length in genome.names_lengths():
                 vcf_header.add_line('##contig=<ID={},length={}>'.format(name, length))
+
+            for key in freebayes_vcf_filters:
+                if key not in vcf_header.filters.keys():
+                    vcf_header.filters.add(key, None,None, freebayes_vcf_filters[key])
 
             vcf_header.add_line('##INFO=<ID=pos2,Number=.,Type=String,Description="Second positions of the variant. '
                 'Format: chrom:pos:strand">')

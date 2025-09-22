@@ -301,7 +301,7 @@ def analyze_locus(locus, model_params, data, samples, limit_regions, assume_cn):
         common.log('Updating Freebayes calls with precalled variants from {}'.format(filenames.precalled))
         variants_.update_with_precalled(filenames.freebayes, filenames.precalled, filenames.freebayes_updated, call_regions, genome) # type: ignore
         os.rename(filenames.freebayes_updated, filenames.freebayes)
-        
+    call_vcf_filters = variants_.VariantReadObservations.get_vcf_filters(filenames.freebayes)
 
     common.log('    [{}] Loading read-allele observations'.format(locus.name))
     dupl_pos_finder = variants_.DuplPositionFinder(locus.chrom_id, duplications)
@@ -309,7 +309,7 @@ def analyze_locus(locus, model_params, data, samples, limit_regions, assume_cn):
         all_read_allele_obs = variants_.read_freebayes_results(ra_inp, samples, vcf_file, dupl_pos_finder)
 
     all_read_allele_obs = variants_.add_psv_variants(locus, all_read_allele_obs, psv_records, genome, varcall_params)
-    vcf_headers = variants_.VariantReadObservations.create_vcf_headers(genome, sys.argv, samples)
+    vcf_headers = variants_.VariantReadObservations.create_vcf_headers(genome, sys.argv, samples, call_vcf_filters)
     for read_allele_obs in all_read_allele_obs:
         read_allele_obs.init_vcf_records(genome, vcf_headers)
 
