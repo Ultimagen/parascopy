@@ -575,7 +575,7 @@ class VariantReadObservations:
         self.variant_positions = None
         # Number of variant positions that are out of bounds.
         self.pos_out_of_bounds = 0
-        self.new_vcf_records = None
+        self.new_vcf_records:list | None = None
         # For each variant position (each repeat copy), stores array old_to_new,
         # where old_to_new[variant_allele] -> variant_allele on that repeat copy.
         self._new_vcf_allele_corresp = None
@@ -916,13 +916,26 @@ class VariantReadObservations:
         assert len(self.new_vcf_records) == len(self.variant_positions) + 1
         assert len(self.variant_positions) == len(self._ref_alleles)
 
+    def _update_vcf_filters(self):
+        filters = []
+        if self.new_vcf_records is None:
+            return
+        for record in self.new_vcf_records:
+            for filt in record.filter.keys():
+                if filt not in filters and filt != 'PASS':
+                    filters.append(filt)
+        for record in self.new_vcf_records:
+            for filt in filters:
+                if filt not in record.filter.keys():
+                    record.filter.add(filt)
+
     def update_vcf_records(self, gt_pred, genome):
         PHRED_THRESHOLD = 3
 
         var_pscn = gt_pred.variant_pscn
         sample_id = gt_pred.sample_id
         read_depth = np.sum(gt_pred.all_allele_counts) + self.other_observations[sample_id]
-
+        self._update_vcf_filters()
         for i, record in enumerate(self.new_vcf_records):
             old_to_new = self._new_vcf_allele_corresp[i]
             rec_fmt = record.samples[sample_id]
