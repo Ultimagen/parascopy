@@ -912,6 +912,9 @@ class VariantReadObservations:
                 pos2_str = ['.']
             record.info['pos2'] = pos2_str
             record.info['overlPSV'] = 'T' if self.has_psvs else 'F'
+            if self.variant is not None:
+                for k in self.variant.filter.keys():
+                    record.filter.add(k)
             self.new_vcf_records.append(record)
         assert len(self.new_vcf_records) == len(self.variant_positions) + 1
         assert len(self.variant_positions) == len(self._ref_alleles)
@@ -1040,7 +1043,8 @@ class VariantReadObservations:
         MAX_QUAL = 10000.0
 
         for i, record in enumerate(self.new_vcf_records):
-            record.filter.add('PASS')
+            if len(record.filter) == 0:
+                record.filter.add('PASS')
             if i == 0:
                 # Pooled Quality
                 if self.has_psvs:
