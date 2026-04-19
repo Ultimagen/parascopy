@@ -499,7 +499,7 @@ def _cluster_psvs(psv_infos, psv_counts, n_samples):
                     break
             else:
                 dist_matrix[psv_i, psv_j] = dist_matrix[psv_j, psv_i] = \
-                    scipy.spatial.distance.pdist((cor_matrix[psv_i, mask], cor_matrix[psv_j, mask])) / mask_size
+                    (scipy.spatial.distance.pdist((cor_matrix[psv_i, mask], cor_matrix[psv_j, mask])) / mask_size)[0]
     all_usable = np.array([psv_info.psv_ix for psv_info in psv_infos if psv_info.in_em])
     N_CLUSTERS = 2
     MIN_CLUSTER_SIZE = 5
