@@ -339,7 +339,7 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
             records.extend(read_pair.get_all())
 
         if not single_out:
-            records.sort(key=operator.attrgetter('reference_start'))
+            records.sort(key=lambda r: (r.reference_id, r.reference_start))
         for rec in records:
             tmp_bam.write(rec)
         if not single_out:
