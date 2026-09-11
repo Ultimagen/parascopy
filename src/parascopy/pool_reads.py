@@ -127,7 +127,9 @@ def _create_record(orig_record, header, read_groups, status,
     # This is either input cigar_tuples, or orig_record.cigartuples.
     if cigar_tuples:
         if contig == UNDEF:
-            record.reference_id = 0
+            # Mate records (from `_add_mates`) carry no `contig`; map by name so the tid
+            # matches the genome-ordered pooled header instead of defaulting to chr1 (tid 0).
+            record.reference_id = header.get_tid(orig_record.reference_name)
         else:
             record.reference_id = header.get_tid(contig)
         record.reference_start = orig_record.reference_start if start is UNDEF else start
@@ -138,7 +140,10 @@ def _create_record(orig_record, header, read_groups, status,
     else:
         record.is_unmapped = True
         if start is not UNDEF:
-            record.reference_id = 0
+            if contig == UNDEF:
+                record.reference_id = header.get_tid(orig_record.reference_name)
+            else:
+                record.reference_id = header.get_tid(contig)
             record.reference_start = start
 
     read_group = orig_record.get_tag('RG') if orig_record.has_tag('RG') else None
@@ -250,9 +255,11 @@ def _add_mates(in_bam, out_reads, genome, out_header, read_groups, max_mate_dist
             if read_pair.from_main_copy:
                 new_rec = _create_record(record, out_header, read_groups, bam_file_.ReadStatus.ReadMate)
             else:
-                unmapped_pos = read_pair.records[1 - record.is_read2][0].reference_start
+                # Realigned pair: place the mate unmapped alongside its already-placed
+                # partner (region1), so it must inherit the partner's contig, not its own.
+                partner = read_pair.records[1 - record.is_read2][0]
                 new_rec = _create_record(record, out_header, read_groups, bam_file_.ReadStatus.ReadMate,
-                    cigar_tuples=None, start=unmapped_pos)
+                    cigar_tuples=None, start=partner.reference_start, contig=partner.reference_name)
             read_pair.add(new_rec)
 
 
@@ -338,13 +345,16 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
             read_pair.connect_pairs(max_mate_dist)
             records.extend(read_pair.get_all())
 
-        if not single_out:
-            records.sort(key=operator.attrgetter('reference_start'))
         for rec in records:
             tmp_bam.write(rec)
         if not single_out:
             tmp_bam.close()
-            _index_and_move(curr_tmp_path, curr_out_path, write_cram, samtools)
+            # Pooled reads span multiple contigs (PE mates map to paralogous copies on
+            # other chromosomes), so run a full coordinate sort before indexing rather than
+            # a position-only Python sort, mirroring the `single_out=True` path below.
+            curr_tmp_path2 = curr_tmp_path + '2'
+            _sort_output(curr_tmp_path, curr_tmp_path2, write_cram, genome.filename, samtools)
+            _index_and_move(curr_tmp_path2, curr_out_path, write_cram, samtools)
 
     if single_out:
         tmp_bam.close()
