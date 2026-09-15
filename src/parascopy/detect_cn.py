@@ -479,7 +479,8 @@ def analyze_region(interval, subdir, data, samples, bg_depth, model_params, forc
     extra_files = dict(depth='depth.csv', region_groups='region_groups.txt', windows='windows.bed',
         hmm_states='hmm_states.csv', hmm_params='hmm_params.csv',
         viterbi_summary='viterbi_summary.txt', detailed_cn='detailed_copy_num.bed',
-        paralog_cn='paralog_copy_num.csv', gene_conversion='gene_conversion.bed')
+        paralog_cn='paralog_copy_num.csv', gene_conversion='gene_conversion.bed',
+        psv_usage='psv_usage.tsv')
     if not model_params.is_loaded:
         extra_files.update(dict(
             psv_f_values='em_f_values.csv', interm_psv_f_values='em_interm_f_values.csv',
