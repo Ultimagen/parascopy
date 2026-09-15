@@ -1,0 +1,25 @@
+name: Build parascopy docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: "Docker image tag, If omitted will use github short sha"
+        required: false
+        type: string
+
+permissions:
+  id-token: write # Required for assuming an AWS role
+  contents: read # Required for actions/checkout
+
+jobs:
+  build:
+    uses: Ultimagen/ugbio-utils/.github/workflows/docker-build-push.yml@main
+    secrets: inherit
+    with:
+       git-repo: ${{ github.repository }}
+       git-ref: ${{ github.ref_name }}
+       docker-image: parascopy
+       docker-tag: ${{ inputs.docker-tag }}
+       docker-file: Dockerfile.parascopy
+       

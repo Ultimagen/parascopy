@@ -34,6 +34,20 @@ def get_read_groups(bam_file):
             read_groups.append((id_m.group(1), sample_m.group(1)))
     return read_groups
 
+def get_read_groups_tags(bam_file):
+    """Returns a dictionary of dictionaries of key/value from each read group
+    in the BAM header. In the main dictionary the keys are read group IDs"""
+    read_groups = []
+    for line in str(bam_file.header).splitlines():
+        if line.startswith('@RG'):
+            has_rg = True
+            lsp = line.split('\t')
+            lsp = lsp[1:]
+            read_groups.append(dict([ (x[:x.index(":")], x[x.index(":")+1:]) for x in lsp]))
+    read_groups_tags_dict = {}
+    for rg in read_groups:
+        read_groups_tags_dict[rg['ID']] = rg
+    return read_groups_tags_dict
 
 def get_comment_items(bam_file):
     """

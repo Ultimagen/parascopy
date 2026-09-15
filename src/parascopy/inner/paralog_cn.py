@@ -499,7 +499,7 @@ def _cluster_psvs(psv_infos, psv_counts, n_samples):
                     break
             else:
                 dist_matrix[psv_i, psv_j] = dist_matrix[psv_j, psv_i] = \
-                    scipy.spatial.distance.pdist((cor_matrix[psv_i, mask], cor_matrix[psv_j, mask])) / mask_size
+                    (scipy.spatial.distance.pdist((cor_matrix[psv_i, mask], cor_matrix[psv_j, mask])) / mask_size)[0]
     all_usable = np.array([psv_info.psv_ix for psv_info in psv_infos if psv_info.in_em])
     N_CLUSTERS = 2
     MIN_CLUSTER_SIZE = 5
@@ -553,6 +553,7 @@ def write_headers(out, samples, args):
     out.checked_write('paralog_cn', 'region_group\tsample\tregion1\tgenotypes\tmarginal_probs\n')
     out.checked_write('gene_conversion',
         '#chrom\tstart\tend\tsample\tregion_group\tmain_gt\treplacement_gt\tqual\tn_psvs\n')
+    out.checked_write('psv_usage', 'region_group\tsample\tregion1\tpsv_chrom\tpsv_pos\n')
 
 
 def create_psv_infos(psvs, region_group, n_samples, genome):
@@ -1027,6 +1028,12 @@ def _single_sample_pscn(sample_id, sample_name, sample_results, region_group_ext
             continue
         rel_psv_infos = [psv_infos[psv_ix] for psv_ix in reliable_psv_ixs]
 
+        region1 = Interval(curr_results[0].region1.chrom_id,
+            curr_results[0].region1.start, curr_results[-1].region1.end).to_str(genome)
+        for psv_info in rel_psv_infos:
+            out.psv_usage.write('{}\t{}\t{}\t{}\t{}\n'.format(
+                group_name, sample_name, region1, psv_info.chrom, psv_info.start + 1))
+
         # ===== Run E-step once again to calculate psCN =====
         poss_pscns, poss_pscn_probs = _single_sample_e_step(sample_id, sample_agcn, rel_psv_infos)
         marginal_probs, paralog_cn, paralog_qual = calculate_marginal_probs(poss_pscns, poss_pscn_probs,
@@ -1048,8 +1055,6 @@ def _single_sample_pscn(sample_id, sample_name, sample_results, region_group_ext
         else:
             gene_conv = None
 
-        region1 = Interval(curr_results[0].region1.chrom_id,
-            curr_results[0].region1.start, curr_results[-1].region1.end).to_str(genome)
         outp.write('{}\t{}\t{}\t'.format(group_name, sample_name, region1))
         outp.write('  '.join(map('%s=%.1f'.__mod__,
             zip(poss_pscns_str, np.abs(poss_pscn_probs / common.LOG10)))))

@@ -252,9 +252,11 @@ def analyze_locus(locus, model_params, data, samples, limit_regions, assume_cn):
     if data.bam_wrappers is None:
         prefix = os.path.join(filenames.par_dir, 'pooled_reads')
         filenames.pooled = pool_reads.get_pooled_filenames(None, prefix)
+        keep_pooled = filenames.par_dir != filenames.out_dir # Pooled reads are located in a different directory
         if filenames.pooled is None:
             raise FileNotFoundError('Could not find pooled reads at "{}*"'.format(prefix))
     else:
+        keep_pooled = True
         prefix = os.path.join(filenames.out_dir, 'pooled_reads')
         filenames.pooled = pool_reads.get_pooled_filenames(len(data.bam_wrappers), prefix)
         if filenames.pooled is None:
@@ -282,12 +284,24 @@ def analyze_locus(locus, model_params, data, samples, limit_regions, assume_cn):
     cn_profiles = paralog_cn.CopyNumProfiles(filenames.cn_res, genome, samples, locus.chrom_id)
     filenames.read_allele = os.path.join(filenames.subdir, 'read_allele_obs.bin')
     filenames.freebayes = os.path.join(filenames.subdir, 'freebayes.vcf')
+    if args.precalled_variants is not None:
+        filenames.precalled = args.precalled_variants
+        filenames.freebayes_updated = filenames.freebayes + '.with_precalled.vcf'
+    else:
+        filenames.precalled = None
+        filenames.freebayes_updated = filenames.freebayes
     filenames.cnv_map = os.path.join(filenames.subdir, 'cnv_map.bed')
     filenames.pooled_bed = os.path.join(filenames.out_dir, 'variants_pooled.bed.gz')
     filenames.paralog_bed = os.path.join(filenames.out_dir, 'variants.bed.gz')
     _write_calling_regions(cn_profiles, samples, genome, assume_cn, args.max_agcn, filenames)
 
     _run_freebayes(locus, genome, args, filenames, call_regions)
+    
+    if filenames.precalled is not None:
+        common.log('Updating Freebayes calls with precalled variants from {}'.format(filenames.precalled))
+        variants_.update_with_precalled(filenames.freebayes, filenames.precalled, filenames.freebayes_updated, call_regions, genome) # type: ignore
+        os.rename(filenames.freebayes_updated, filenames.freebayes)
+    call_vcf_filters = variants_.VariantReadObservations.get_vcf_filters(filenames.freebayes)
 
     common.log('    [{}] Loading read-allele observations'.format(locus.name))
     dupl_pos_finder = variants_.DuplPositionFinder(locus.chrom_id, duplications)
@@ -295,7 +309,7 @@ def analyze_locus(locus, model_params, data, samples, limit_regions, assume_cn):
         all_read_allele_obs = variants_.read_freebayes_results(ra_inp, samples, vcf_file, dupl_pos_finder)
 
     all_read_allele_obs = variants_.add_psv_variants(locus, all_read_allele_obs, psv_records, genome, varcall_params)
-    vcf_headers = variants_.VariantReadObservations.create_vcf_headers(genome, sys.argv, samples)
+    vcf_headers = variants_.VariantReadObservations.create_vcf_headers(genome, sys.argv, samples, call_vcf_filters)
     for read_allele_obs in all_read_allele_obs:
         read_allele_obs.init_vcf_records(genome, vcf_headers)
 
@@ -321,6 +335,8 @@ def analyze_locus(locus, model_params, data, samples, limit_regions, assume_cn):
     filenames.out_vcf = os.path.join(filenames.out_dir, 'variants.vcf.gz')
     filenames.out_pooled_vcf = os.path.join(filenames.out_dir, 'variants_pooled.vcf.gz')
     variants_.write_vcf_file(filenames, vcf_headers, all_read_allele_obs, genome, args.tabix)
+
+    detect_cn.clean_subdir(locus.name, filenames.out_dir, args.clean, () if keep_pooled else filenames.pooled)
     os.mknod(filenames.success)
     common.log('[{}] Success'.format(locus.name))
 
@@ -520,6 +536,8 @@ def main(prog_name=None, in_argv=None):
         help='Maximum unpaired bias (Phred score) [default: %(default)s].')
     call_args.add_argument('--max-agcn', type=int, metavar='<int>', default=10,
         help='Maximum aggregate copy number [default: %(default)s].')
+    call_args.add_argument('--precalled-variants', metavar='<vcf>', required=False,
+        help='In addition to Freebayes, use variants status and filter from the provided and indexed VCF file')
 
     exec_args = parser.add_argument_group('Execution parameters')
     exec_args.add_argument('--rerun', choices=('full', 'partial', 'none'), metavar='full|partial|none', default='none',
@@ -535,6 +553,10 @@ def main(prog_name=None, in_argv=None):
     exec_args.add_argument('--regions-subset', nargs='+', metavar='<str> [<str> ...]',
         help='Additionally filter input regions: only use regions with names that are in this list.\n'
             'If the first argument is "!", only use regions not in this list.')
+    exec_args.add_argument('--clean', metavar='<str>', default='',
+        help='Which temporary files to remove (multi-letter code, default: empty):\n'
+            '    v - files in `var_extra` subdirectories,\n'
+            '    p - pooled reads BAM/CRAM files.')
     exec_args.add_argument('--samtools', metavar='<path>', default='samtools',
         help='Path to "samtools" executable [default: %(default)s].')
     exec_args.add_argument('--tabix', metavar='<path>', default='tabix',

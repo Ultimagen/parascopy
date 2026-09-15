@@ -346,7 +346,45 @@ def get_pool_interval(interval, genome, pool_interval=2000):
     return pool_interval
 
 
+def clean_subdir(locus, subdir, code, pooled_filenames):
+    for letter in code:
+        if letter == 'e' or letter == 'v':
+            extra_dir = os.path.join(subdir, 'extra' if letter == 'e' else 'var_extra')
+            filenames = next(os.walk(extra_dir), (None, None, []))[2]
+            count = 0
+            for filename in filenames:
+                if filename != 'success':
+                    count += 1
+                    os.remove(os.path.join(extra_dir, filename))
+            if count:
+                common.log(f'[{locus}] Removed {count} files in {extra_dir}')
+
+        elif letter == 'p':
+            if not pooled_filenames:
+                common.log(f'WARN: Asked to clean pooled reads, but none found. Possibly, other input directory?')
+            common.log(f'[{locus}] Removing pooled reads ({pooled_filenames[0]}, ...)')
+            for filename in pooled_filenames:
+                os.remove(filename)
+                if filename.endswith('.bam') and os.path.exists(f'{filename}.bai'):
+                    os.remove(f'{filename}.bai')
+                if filename.endswith('.cram') and os.path.exists(f'{filename}.bai'):
+                    os.remove(f'{filename}.crai')
+
+            pooled_dir = os.path.dirname(pooled_filenames[0])
+            success_filename = os.path.join(pooled_dir, 'success')
+            if os.path.exists(success_filename):
+                os.remove(success_filename)
+                try:
+                    os.rmdir(pooled_dir)
+                except OSError:
+                    common.log(f'WARN: Failed to remove {pooled_dir}: directory not empty')
+
+        else:
+            common.log(f'[{locus}] WARN: Unknown letter {letter} in --clean "{code}"')
+
+
 def analyze_region(interval, subdir, data, samples, bg_depth, model_params, force_agcn, modified_ref_cns):
+    
     duplications = []
     pool_duplications = []
     skip_regions = []
@@ -441,7 +479,8 @@ def analyze_region(interval, subdir, data, samples, bg_depth, model_params, forc
     extra_files = dict(depth='depth.csv', region_groups='region_groups.txt', windows='windows.bed',
         hmm_states='hmm_states.csv', hmm_params='hmm_params.csv',
         viterbi_summary='viterbi_summary.txt', detailed_cn='detailed_copy_num.bed',
-        paralog_cn='paralog_copy_num.csv', gene_conversion='gene_conversion.bed')
+        paralog_cn='paralog_copy_num.csv', gene_conversion='gene_conversion.bed',
+        psv_usage='psv_usage.tsv')
     if not model_params.is_loaded:
         extra_files.update(dict(
             psv_f_values='em_f_values.csv', interm_psv_f_values='em_interm_f_values.csv',
@@ -464,7 +503,7 @@ def analyze_region(interval, subdir, data, samples, bg_depth, model_params, forc
             samples, bg_depth, read_groups_dict, dupl_hierarchy, out.depth)
 
         if not model_params.is_loaded:
-            _filter_windows(window_counts, bg_depth, dupl_hierarchy, min_windows=args.min_windows, perc_samples=10.0)
+            _filter_windows(window_counts, bg_depth, dupl_hierarchy, min_windows=args.min_windows, perc_samples=50.0)
             model_params.set_dupl_hierarchy(dupl_hierarchy)
 
         time_log.log('Writing read depth and PSV observations')
@@ -532,6 +571,7 @@ def analyze_region(interval, subdir, data, samples, bg_depth, model_params, forc
     time_log.log('Success')
     time_log.close()
 
+    clean_subdir(interval.name, subdir, args.clean, pooled_filenames)
     common.log('[{}] Success'.format(interval.name))
     # Touch empty file.
     os.mknod(os.path.join(extra_subdir, 'success'))
@@ -1079,6 +1119,10 @@ def parse_args(prog_name, in_argv, is_new):
         help='Pool reads into CRAM files (currently, BAM by default).')
     exec_args.add_argument('-@', '--threads', type=int, metavar='<int>', default=4,
         help='Number of available threads [default: %(default)s].')
+    exec_args.add_argument('--clean', metavar='<str>', default='',
+        help='Which temporary files to remove (multi-letter code, default: empty):\n'
+            '    e - files in `extra` subdirectories,\n'
+            '    p - pooled reads BAM/CRAM files.')
     exec_args.add_argument('--samtools', metavar='<path>|none', default='samtools',
         help='Path to samtools executable [default: %(default)s].\n'
             'Use python wrapper if "none", can lead to errors.')

@@ -1,0 +1,66 @@
+FROM python:3.10.15-slim AS samtools
+
+ARG SAMTOOLSVER="1.17"
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    libncurses5-dev \
+    libbz2-dev \
+    liblzma-dev \
+    libcurl4-gnutls-dev \
+    zlib1g-dev \
+    libssl-dev \
+    gcc \
+    wget \
+    make \
+    perl \
+    bzip2 \
+    gnuplot \
+    ca-certificates \
+    gawk
+
+RUN wget https://github.com/samtools/samtools/releases/download/${SAMTOOLSVER}/samtools-${SAMTOOLSVER}.tar.bz2 && \
+    tar -xjf samtools-${SAMTOOLSVER}.tar.bz2 && \
+    rm samtools-${SAMTOOLSVER}.tar.bz2 && \
+    cd samtools-${SAMTOOLSVER} && \
+    ./configure && \
+    make -j $(nproc) && \
+    make install
+   
+FROM python:3.10.15-slim
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    bcftools \
+    tabix \
+    bwa \
+    procps && \
+    apt-get autoclean && rm -rf /var/lib/apt/lists/*
+
+COPY --from=samtools /usr/local/bin/samtools /usr/local/bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends meson 
+
+RUN apt-get update && apt-get install -y --no-install-recommends git zlib1g-dev libgsl-dev build-essential liblzma-dev pkg-config
+
+RUN git clone --recursive https://github.com/tprodanov/freebayes &&  \
+    cd freebayes && \
+    ./compile.sh && \
+    cp build/freebayes /usr/local/bin/freebayes && \
+    cd ..
+
+WORKDIR /parascopy
+COPY . .
+
+RUN pip install .
+
+# Include licenses
+COPY ["LICENSE", "./"]
+COPY ["Third_Party_Licenses/", "./Third_Party_Licenses/"]
+
+# Create user (UID 1000) - for running
+RUN groupadd -g 1000 parascopy && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash parascopy
+
+RUN chown parascopy:parascopy /parascopy && \
+    chmod 755 /parascopy
+
+USER parascopy

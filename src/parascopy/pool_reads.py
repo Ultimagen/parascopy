@@ -8,7 +8,7 @@ import pysam
 import numpy as np
 from collections import defaultdict
 from enum import Enum
-
+import tqdm.auto as tqdm
 from .inner import common
 from .inner import duplication as duplication_
 from .inner.genome import Genome, Interval
@@ -20,7 +20,6 @@ from . import long_version
 
 
 MAX_REALIGNED_DIST = 100
-
 class ReadPair:
     def __init__(self, record, max_mate_dist, from_main_copy):
         self.primary_ref_id = record.reference_id
@@ -101,7 +100,8 @@ UNDEF = common.UNDEF
 
 
 def _create_record(orig_record, header, read_groups, status,
-        *, dupl_strand=True, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF):
+        *, dupl_strand=True, contig=UNDEF, start=UNDEF, cigar_tuples=UNDEF, seq=UNDEF, qual=UNDEF, 
+        tags_to_reverse = UNDEF, tags_to_retain = UNDEF):
     """
     Creates a new record by taking the orig_record as a template.
     If start, cigar_tuples, seq, qual are not provided, take them frmo the original record.
@@ -112,13 +112,24 @@ def _create_record(orig_record, header, read_groups, status,
         if seq is UNDEF else seq
     record.query_qualities = common.cond_reverse(orig_record.query_qualities, strand=dupl_strand) \
         if qual is UNDEF else qual
+    if tags_to_reverse is not UNDEF:
+        for t in tags_to_reverse:
+            if orig_record.has_tag(t):
+                record.set_tag(t, common.cond_reverse(orig_record.get_tag(t), strand=dupl_strand))
+    if tags_to_retain is not UNDEF:
+        for t in tags_to_retain:
+            if orig_record.has_tag(t):
+                record.set_tag(t, orig_record.get_tag(t))
 
     if cigar_tuples is UNDEF:
         assert dupl_strand
         cigar_tuples = orig_record.cigartuples
     # This is either input cigar_tuples, or orig_record.cigartuples.
     if cigar_tuples:
-        record.reference_id = 0
+        if contig == UNDEF:
+            record.reference_id = 0
+        else:
+            record.reference_id = header.get_tid(contig)
         record.reference_start = orig_record.reference_start if start is UNDEF else start
         record.mapping_quality = 60
         record.cigartuples = cigar_tuples
@@ -147,34 +158,44 @@ def _create_record(orig_record, header, read_groups, status,
 
 
 def _create_header(genome, chrom_id, bam_wrappers, max_mate_dist):
-    header = '@SQ\tSN:{}\tLN:{}\n'.format(genome.chrom_name(chrom_id), genome.chrom_len(chrom_id))
+    header = ''
+    for chrom_id in range(genome.n_chromosomes):
+        header += '@SQ\tSN:{}\tLN:{}\n'.format(genome.chrom_name(chrom_id), genome.chrom_len(chrom_id))
     for bam_wrapper in bam_wrappers:
-        for group_id, sample in bam_wrapper.read_groups().values():
+        for group_id_key in bam_wrapper.read_groups():
+            group_id, sample = bam_wrapper.read_groups()[group_id_key]
             assert isinstance(sample, str)
-            header += '@RG\tID:{}\tSM:{}\n'.format(group_id, sample)
+            header += '@RG\tID:{}\tSM:{}'.format(group_id, sample)
+            for tag, value in bam_wrapper._read_groups_tags[group_id_key].items():
+                if tag != 'ID' and tag != 'SM':
+                    header += '\t{}:{}'.format(tag, value)
+            header += '\n'
     header += '@CO\tmax_mate_dist={}\n'.format(max_mate_dist)
     return pysam.AlignmentHeader.from_text(header)
 
 
-def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist):
+def _extract_reads(in_bam, out_reads, read_groups, region, genome, out_header, max_mate_dist, 
+                   tags_to_reverse = UNDEF, tags_to_retain = UNDEF):
     for record in common.checked_fetch(in_bam, region, genome):
         if record.flag & 3844:
             continue
-
         read_pair = out_reads.get(record.query_name)
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, True)
-        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc))
+        read_pair.add(_create_record(record, out_header, read_groups, bam_file_.ReadStatus.SameLoc, 
+                                     tags_to_retain = tags_to_retain,
+                                     tags_to_reverse = tags_to_reverse, 
+                                     contig=record.reference_name))
 
 
-def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist):
+def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out_header, weights, max_mate_dist, 
+tags_to_reverse = UNDEF, tags_to_retain = UNDEF):
     """
     Load reads from dupl.region2 and aligns them to dupl.region1.
     """
     for record in common.checked_fetch(in_bam, dupl.region2, genome):
         if record.flag & 3844:
             continue
-
         read_pair = out_reads.get(record.query_name)
         if read_pair is None:
             out_reads[record.query_name] = read_pair = ReadPair(record, max_mate_dist, False)
@@ -184,7 +205,9 @@ def _extract_reads_and_realign(in_bam, out_reads, read_groups, dupl, genome, out
 
         cigar_tuples = reg1_aln.cigar.to_pysam_tuples() if reg1_aln.cigar is not None else None
         new_rec = _create_record(record, out_header, read_groups, bam_file_.ReadStatus.Realigned,
-            dupl_strand=dupl.strand, seq=read_seq, cigar_tuples=cigar_tuples, start=reg1_aln.ref_interval.start)
+            dupl_strand=dupl.strand, seq=read_seq, cigar_tuples=cigar_tuples, start=reg1_aln.ref_interval.start, 
+            contig = reg1_aln.ref_interval.chrom_name(genome), tags_to_reverse=tags_to_reverse, 
+            tags_to_retain = tags_to_retain)
         read_pair.add(new_rec)
 
 
@@ -262,7 +285,8 @@ DEFAULT_MATE_DISTANCE = 5000
 
 def pool(bam_wrappers, out_path, interval, duplications, genome, *,
         samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE,
-        verbose=True, time_log=None, write_cram=True, single_out=False):
+        verbose=True, time_log=None, write_cram=True, single_out=False, 
+        tags_to_reverse = [], tags_to_retain = []):
     """
     Pools reads from multiple BAM/CRAM files.
     Returns list of output files.
@@ -300,10 +324,12 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
         out_reads = {}
         read_groups = bam_wrapper.read_groups()
         with bam_wrapper.open_bam_file(genome) as bam_file:
-            _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist)
-            for dupl in duplications:
+            _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, 
+                            tags_to_reverse=tags_to_reverse, tags_to_retain = tags_to_retain)
+            for dupl in tqdm.tqdm(duplications):
                 _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
-                    out_header, weights, max_mate_dist)
+                    out_header, weights, max_mate_dist, tags_to_reverse = tags_to_reverse, 
+                    tags_to_retain = tags_to_retain)
             if max_mate_dist != 0:
                 _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist)
 
@@ -313,7 +339,7 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
             records.extend(read_pair.get_all())
 
         if not single_out:
-            records.sort(key=operator.attrgetter('reference_start'))
+            records.sort(key=lambda r: (r.reference_id, r.reference_start))
         for rec in records:
             tmp_bam.write(rec)
         if not single_out:
@@ -389,6 +415,7 @@ class BamWrapper:
         self._input_sample = sample
         with self.open_bam_file(genome) as bam_file:
             self._old_read_groups = bam_file_.get_read_groups(bam_file)
+            self._old_read_group_tags = bam_file_.get_read_groups_tags(bam_file)
             if store_contigs:
                 self._contigs = tuple(bam_file.references)
             else:
@@ -398,6 +425,7 @@ class BamWrapper:
     def init_new_read_groups(self, samples):
         # Dictionary old_read_group -> (new_read_group, sample_name).
         self._read_groups = {}
+        self._read_groups_tags = {}
 
         if self._input_sample is not None:
             # Associate reads without read_group with sample from the input file.
@@ -408,6 +436,7 @@ class BamWrapper:
             new_sample = self._input_sample or old_sample
             new_read_group = '{}-{}'.format(old_read_group, samples.id(new_sample))
             self._read_groups[old_read_group] = (new_read_group, new_sample)
+            self._read_groups_tags[old_read_group] = self._old_read_group_tags[old_read_group]
 
         if not self._read_groups:
             common.log('ERROR: Input file {} has no read groups in the header.'.format(self._filename))
@@ -511,7 +540,7 @@ def get_only_regions(args):
 def main(prog_name=None, in_argv=None):
     prog_name = prog_name or '%(prog)s'
     parser = argparse.ArgumentParser(
-        description='Pool reads from various copies of a duplication.',
+        description='Pool reads from various copies of a duplication',
         formatter_class=argparse.RawTextHelpFormatter, add_help=False,
         usage='{} (-i <bam> [...] | -I <bam-list>) -t <table> -f <fasta> -r <region> -o <dir>'.format(prog_name))
     io_args = parser.add_argument_group('Input/output arguments')
@@ -552,6 +581,8 @@ def main(prog_name=None, in_argv=None):
             'if the distance between mates is less than <int> [default: %(default)s].\n'
             'Use 0 to skip all mates outside the duplicated regions.\n'
             'Use inf|infinity to write all mapped read mates.\n')
+    opt_args.add_argument('--tags_to_reverse', nargs='+', default=[],help='Optional tags to be included in the output BAM file and reversed.')
+    opt_args.add_argument('--tags_to_retain', nargs='+', default=[],help='Optional tags to be included in the output BAM file and retained.')    
     opt_args.add_argument('-q', '--quiet', action='store_false', dest='verbose',
         help='Do not write information to the stderr.')
     opt_args.add_argument('--samtools', metavar='<path>|none', default='samtools',
@@ -589,7 +620,8 @@ def main(prog_name=None, in_argv=None):
         bam_wrappers, _samples = load_bam_files(args.input, args.input_list, genome)
         duplications = load_duplications(table, genome, interval, args.exclude)
         pool(bam_wrappers, args.output, interval, duplications, genome,
-            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose,
+            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose, 
+            tags_to_reverse=args.tags_to_reverse, tags_to_retain = args.tags_to_retain,
             single_out=single_out, write_cram=write_cram)
     if args.verbose:
         common.log('Success')
