@@ -28,7 +28,7 @@ RUN wget https://github.com/samtools/samtools/releases/download/${SAMTOOLSVER}/s
    
 FROM python:3.10.15-slim
 
-RUN apt-get update -y && apt-get install -y --no-install-recommends \
+RUN apt-get update -y && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     bcftools \
     tabix \
     bwa \
