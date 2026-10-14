@@ -12,7 +12,7 @@ def _parse_region(region_str):
     chrom = parts[0]
     coord_parts = parts[1].split('-')
     start = int(coord_parts[0]) - 1
-    end = int(coord_parts[1]) - 1
+    end = int(coord_parts[1])
     return (chrom, start, end)
 
 
