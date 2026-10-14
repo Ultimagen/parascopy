@@ -20,6 +20,9 @@ Commands:
     table       Convert homology pre-table into homology table.
                 This command combines overlapping homologous regions
                 into longer duplications.
+    create-hom-regions  Create BED file from model files.
+                This command extracts homologous regions from model files
+                and creates a sorted BED file.
 
 \033[32m[ Analyzing BAM/CRAM files ]\033[0m
     depth       Calculate read depth and variance in given genomic windows.
@@ -114,6 +117,11 @@ def main():
     if command == 'table':
         from . import combine_table
         return _process_exceptions(combine_table.main, inner_prog, inner_argv)
+
+    valid_commands.append('create-hom-regions')
+    if command == 'create-hom-regions':
+        from . import create_hom_regions
+        return _process_exceptions(create_hom_regions.main, inner_prog, inner_argv)
 
     valid_commands.append('depth')
     if command == 'depth':
