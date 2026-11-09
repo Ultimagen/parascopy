@@ -20,6 +20,6 @@ jobs:
        git-repo: ${{ github.repository }}
        git-ref: ${{ github.ref_name }}
        docker-image: parascopy
-       docker-tag: ${{ inputs.docker-tag }}
-       docker-file: Dockerfile.parascopy
+       docker-tag: ${{ inputs.image-tag }}
+       docker-file: Dockerfile
        
