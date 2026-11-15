@@ -263,11 +263,13 @@ def _add_mates(in_bam, out_reads, genome, out_header, read_groups, max_mate_dist
             read_pair.add(new_rec)
 
 
-def _sort_output(in_path, out_path, write_cram, ref_filename, samtools):
+def _sort_output(in_path, out_path, write_cram, ref_filename, samtools, embed_ref=False):
     args = (
         '--reference', ref_filename,
         '-O', 'cram' if write_cram else 'bam',
         '-o', out_path, in_path)
+    if write_cram and embed_ref:
+        args = ('--output-fmt-option', 'embed_ref=1') + args
     if samtools == 'none' or samtools is None:
         pysam.sort(*args)
     else:
@@ -290,12 +292,21 @@ def _index_and_move(tmp_path, out_path, write_cram, samtools):
 
 DEFAULT_MATE_DISTANCE = 5000
 
-def pool(bam_wrappers, out_path, interval, duplications, genome, *,
-        samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE,
-        verbose=True, time_log=None, write_cram=True, single_out=False, 
-        tags_to_reverse = [], tags_to_retain = []):
+def pool(bam_wrappers, out_path, interval, duplications, genome, **kwargs):
     """
-    Pools reads from multiple BAM/CRAM files.
+    Pools reads from multiple BAM/CRAM files for a single locus.
+    See `pool_regions` for the arguments.
+    """
+    return pool_regions(bam_wrappers, out_path, [(interval, duplications)], genome, **kwargs)
+
+
+def pool_regions(bam_wrappers, out_path, regions_duplications, genome, *,
+        samtools='samtools', weights=None, max_mate_dist=DEFAULT_MATE_DISTANCE,
+        verbose=True, time_log=None, write_cram=True, single_out=False,
+        tags_to_reverse=[], tags_to_retain=[], embed_ref=False):
+    """
+    Pools reads from multiple BAM/CRAM files over several loci.
+    `regions_duplications` is a list of `(interval, duplications)` pairs.
     Returns list of output files.
     """
     if weights is None:
@@ -309,7 +320,7 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
     if single_out:
         out_filenames.append(out_path)
         tmp_path = out_path + '.tmp'
-        out_header = _create_header(genome, interval.chrom_id, bam_wrappers, max_mate_dist)
+        out_header = _create_header(genome, None, bam_wrappers, max_mate_dist)
         tmp_bam = pysam.AlignmentFile(tmp_path, 'wb', header=out_header)
     else:
         tmp_path = out_header = tmp_bam = None
@@ -319,7 +330,7 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
             curr_out_path = '{}/{}.{}'.format(out_path, bam_index, 'cram' if write_cram else 'bam')
             out_filenames.append(curr_out_path)
             curr_tmp_path = curr_out_path + '.tmp'
-            out_header = _create_header(genome, interval.chrom_id, (bam_wrapper,), max_mate_dist)
+            out_header = _create_header(genome, None, (bam_wrapper,), max_mate_dist)
             tmp_bam = pysam.AlignmentFile(curr_tmp_path, 'wc' if write_cram else 'wb',
                 header=out_header, reference_filename=genome.filename)
             if verbose:
@@ -328,32 +339,37 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
         elif verbose:
             common.log('    [{:3d} / {}]  {}'.format(bam_index + 1, len(bam_wrappers), bam_wrapper.filename))
 
-        out_reads = {}
         read_groups = bam_wrapper.read_groups()
         with bam_wrapper.open_bam_file(genome) as bam_file:
-            _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist, 
-                            tags_to_reverse=tags_to_reverse, tags_to_retain = tags_to_retain)
-            for dupl in tqdm.tqdm(duplications):
-                _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
-                    out_header, weights, max_mate_dist, tags_to_reverse = tags_to_reverse, 
-                    tags_to_retain = tags_to_retain)
-            if max_mate_dist != 0:
-                _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist)
+            for interval, duplications in regions_duplications:
+                # Reads are deduplicated and paired per target region, so the dictionary
+                # must not be shared between (possibly overlapping) regions.
+                out_reads = {}
+                _extract_reads(bam_file, out_reads, read_groups, interval, genome, out_header, max_mate_dist,
+                                tags_to_reverse=tags_to_reverse, tags_to_retain=tags_to_retain)
+                for dupl in tqdm.tqdm(duplications, disable=not verbose):
+                    _extract_reads_and_realign(bam_file, out_reads, read_groups, dupl, genome,
+                        out_header, weights, max_mate_dist, tags_to_reverse=tags_to_reverse,
+                        tags_to_retain=tags_to_retain)
+                if max_mate_dist != 0:
+                    _add_mates(bam_file, out_reads, genome, out_header, read_groups, max_mate_dist)
 
-        records = []
-        for read_pair in out_reads.values():
-            read_pair.connect_pairs(max_mate_dist)
-            records.extend(read_pair.get_all())
+                records = []
+                for read_pair in out_reads.values():
+                    read_pair.connect_pairs(max_mate_dist)
+                    records.extend(read_pair.get_all())
+                # Stable per-region ordering reproduces `samtools cat` of per-region sorted files.
+                records.sort(key=common.record_ord_key)
+                for rec in records:
+                    tmp_bam.write(rec)
 
-        for rec in records:
-            tmp_bam.write(rec)
         if not single_out:
             tmp_bam.close()
             # Pooled reads span multiple contigs (PE mates map to paralogous copies on
             # other chromosomes), so run a full coordinate sort before indexing rather than
             # a position-only Python sort, mirroring the `single_out=True` path below.
             curr_tmp_path2 = curr_tmp_path + '2'
-            _sort_output(curr_tmp_path, curr_tmp_path2, write_cram, genome.filename, samtools)
+            _sort_output(curr_tmp_path, curr_tmp_path2, write_cram, genome.filename, samtools, embed_ref)
             _index_and_move(curr_tmp_path2, curr_out_path, write_cram, samtools)
 
     if single_out:
@@ -363,7 +379,7 @@ def pool(bam_wrappers, out_path, interval, duplications, genome, *,
         if time_log is not None:
             time_log.log('Sorting pooled reads')
         tmp_path2 = tmp_path + '2'
-        _sort_output(tmp_path, tmp_path2, write_cram, genome.filename, samtools)
+        _sort_output(tmp_path, tmp_path2, write_cram, genome.filename, samtools, embed_ref)
         _index_and_move(tmp_path2, out_path, write_cram, samtools)
     else:
         # Touch `success`
@@ -539,8 +555,9 @@ def get_only_regions(args):
     Writes regions used for pooling/realining reads
     """
     with Genome(args.fasta_ref) as genome, pysam.TabixFile(args.table, parser=pysam.asTuple()) as table:
-        interval = Interval.parse(args.region, genome)
-        duplications = load_duplications(table, genome, interval, args.exclude)
+        intervals = common.get_regions(args, genome, only_unique=False)
+        duplications = [dupl for interval in intervals
+            for dupl in load_duplications(table, genome, interval, args.exclude)]
 
     with open(args.only_regions, "a") as out:
         for dupl in duplications:
@@ -552,7 +569,7 @@ def main(prog_name=None, in_argv=None):
     parser = argparse.ArgumentParser(
         description='Pool reads from various copies of a duplication',
         formatter_class=argparse.RawTextHelpFormatter, add_help=False,
-        usage='{} (-i <bam> [...] | -I <bam-list>) -t <table> -f <fasta> -r <region> -o <dir>'.format(prog_name))
+        usage='{} (-i <bam> [...] | -I <bam-list>) -t <table> -f <fasta> (-r <region> [...] | -R <bed> [...]) -o <dir>'.format(prog_name))
     io_args = parser.add_argument_group('Input/output arguments')
 
     inp_me = io_args.add_mutually_exclusive_group(required=True)
@@ -571,14 +588,18 @@ def main(prog_name=None, in_argv=None):
         help='Input indexed bed table with information about segmental duplications.')
     io_args.add_argument('-f', '--fasta-ref', metavar='<file>', required=True,
         help='Input reference fasta file.')
-    io_args.add_argument('-r', '--region', metavar='<region>',
-        help='Single region in format "chr:start-end". Start and end are 1-based inclusive.\n'
-            'Commas are ignored.')
     io_args.add_argument('-o', '--output', metavar='<dir>|<file>', required=True,
         help='Output BAM/CRAM file if corresponding extension is used.\n'
             'Otherwise, write CRAM files in the output directory.')
     io_args.add_argument('-b', '--bam', action='store_true',
         help='Write BAM files to the output directory instead of CRAM.')
+
+    reg_args = parser.add_argument_group('Region arguments')
+    reg_args.add_argument('-r', '--regions', '--region', nargs='+', metavar='<region>', dest='regions',
+        help='Region(s) in format "chr:start-end". Start and end are 1-based inclusive.\n'
+            'Commas are ignored.')
+    reg_args.add_argument('-R', '--regions-file', nargs='+', metavar='<file>',
+        help='Input bed[.gz] file(s) containing regions (tab-separated, 0-based semi-exclusive).')
 
     filt_args = parser.add_argument_group('Duplications filtering arguments')
     filt_args.add_argument('-e', '--exclude', metavar='<expr>',
@@ -593,6 +614,8 @@ def main(prog_name=None, in_argv=None):
             'Use inf|infinity to write all mapped read mates.\n')
     opt_args.add_argument('--tags_to_reverse', nargs='+', default=[],help='Optional tags to be included in the output BAM file and reversed.')
     opt_args.add_argument('--tags_to_retain', nargs='+', default=[],help='Optional tags to be included in the output BAM file and retained.')    
+    opt_args.add_argument('--embed-ref', action='store_true',
+        help='Embed the reference in output CRAM files (samtools sort --output-fmt-option embed_ref=1).')
     opt_args.add_argument('-q', '--quiet', action='store_false', dest='verbose',
         help='Do not write information to the stderr.')
     opt_args.add_argument('--samtools', metavar='<path>|none', default='samtools',
@@ -626,13 +649,15 @@ def main(prog_name=None, in_argv=None):
         common.mkdir(args.output)
 
     with Genome(args.fasta_ref) as genome, pysam.TabixFile(args.table, parser=pysam.asTuple()) as table:
-        interval = Interval.parse(args.region, genome)
+        # Overlapping regions are kept as is: each needs its own homology table query.
+        intervals = common.get_regions(args, genome, only_unique=False)
         bam_wrappers, _samples = load_bam_files(args.input, args.input_list, genome)
-        duplications = load_duplications(table, genome, interval, args.exclude)
-        pool(bam_wrappers, args.output, interval, duplications, genome,
-            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose, 
-            tags_to_reverse=args.tags_to_reverse, tags_to_retain = args.tags_to_retain,
-            single_out=single_out, write_cram=write_cram)
+        regions_duplications = [(interval, load_duplications(table, genome, interval, args.exclude))
+            for interval in intervals]
+        pool_regions(bam_wrappers, args.output, regions_duplications, genome,
+            samtools=args.samtools, max_mate_dist=args.mate_dist, verbose=args.verbose,
+            tags_to_reverse=args.tags_to_reverse, tags_to_retain=args.tags_to_retain,
+            single_out=single_out, write_cram=write_cram, embed_ref=args.embed_ref)
     if args.verbose:
         common.log('Success')
 
